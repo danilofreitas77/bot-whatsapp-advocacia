@@ -1,0 +1,13 @@
+{
+  "name": "bot-whatsapp-advocacia",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bot de WhatsApp para consulta de processos e créditos (n8n + Evolution API)",
+  "scripts": {
+    "build": "node scripts/build-workflow.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

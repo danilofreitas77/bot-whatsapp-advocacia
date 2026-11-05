@@ -1,0 +1,20 @@
+{
+  "config": {
+    "escritorio": "Escritório Exemplo Advocacia",
+    "email": "atendimento@escritorio-exemplo.com.br",
+    "telefone": "(81) 3000-0000",
+    "horario": "segunda a sexta, das 8h às 17h"
+  },
+  "processos": [
+    { "id": "P001", "tipo": "Recuperação Judicial", "uf": "PE", "empresa": "Transportes Alfa Ltda", "andamento": "Plano de recuperação aprovado em assembleia. Pagamentos da classe trabalhista em andamento.", "atualizado_em": "28/10/2026" },
+    { "id": "P002", "tipo": "Recuperação Judicial", "uf": "PE", "empresa": "Construtora Beta S.A.", "andamento": "Aguardando homologação do plano pelo juízo.", "atualizado_em": "15/10/2026" },
+    { "id": "P003", "tipo": "Recuperação Judicial", "uf": "PB", "empresa": "Comercial Gama Ltda", "andamento": "Prazo de habilitação de créditos aberto até 30/11/2026.", "atualizado_em": "01/11/2026" },
+    { "id": "P004", "tipo": "Falência", "uf": "PE", "empresa": "Indústria Delta Ltda", "andamento": "Arrecadação de bens concluída. Leilão previsto para dezembro.", "atualizado_em": "20/10/2026" },
+    { "id": "P005", "tipo": "Dissolução Societária", "uf": "PE", "empresa": "Clínica Épsilon Ltda", "andamento": "Apuração de haveres em fase de perícia contábil.", "atualizado_em": "10/10/2026" }
+  ],
+  "credores": [
+    { "processo_id": "P001", "documento": "123.456.789-09", "nome": "João Exemplo", "classe": "Trabalhista", "valor": "12.450,00", "situacao": "1ª parcela paga em 15/10/2026" },
+    { "processo_id": "P001", "documento": "11.222.333/0001-81", "nome": "Fornecedora Exemplo Ltda", "classe": "Quirografário", "valor": "87.300,50", "situacao": "Aguardando início dos pagamentos da classe" },
+    { "processo_id": "P004", "documento": "987.654.321-00", "nome": "Maria Exemplo", "classe": "Trabalhista", "valor": "8.900,00", "situacao": "Crédito habilitado" }
+  ]
+}

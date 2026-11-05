@@ -1,0 +1,619 @@
+{
+  "name": "Bot WhatsApp - Escritório de Advocacia",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bot-advocacia",
+        "options": {}
+      },
+      "name": "Webhook Evolution",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "bot-advocacia",
+      "id": "00000000-0000-4000-8000-000000000001"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Edite aqui os dados do escritório e da integração.\nreturn [{ json: {\n  escritorio: 'Escritório Exemplo Advocacia',\n  email: 'atendimento@escritorio-exemplo.com.br',\n  telefone: '(81) 3000-0000',\n  horario: 'segunda a sexta, das 8h às 17h',\n  evolutionUrl: 'https://evolution.seu-dominio.com.br',\n  planilhaId: 'COLE_AQUI_O_ID_DA_PLANILHA',\n  segundosDebounce: 8,\n} }];"
+      },
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-000000000002"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrai o que interessa do webhook da Evolution API (evento messages.upsert).\n// Devolve null quando a mensagem deve ser ignorada.\n\nfunction extrairMensagem(body) {\n  const evento = String(body.event || '').toLowerCase().replace('_', '.');\n  if (evento !== 'messages.upsert') return null;\n\n  const data = body.data || {};\n  const key = data.key || {};\n\n  // Mensagem enviada pelo próprio bot também volta pelo webhook.\n  // Sem esse filtro o bot responde a si mesmo em loop.\n  if (key.fromMe) return null;\n\n  const jid = key.remoteJid || '';\n  if (jid.endsWith('@g.us') || jid === 'status@broadcast') return null;\n\n  const m = data.message || {};\n  const texto =\n    m.conversation ||\n    (m.extendedTextMessage && m.extendedTextMessage.text) ||\n    (m.imageMessage && m.imageMessage.caption) ||\n    (m.listResponseMessage && m.listResponseMessage.singleSelectReply &&\n      m.listResponseMessage.singleSelectReply.selectedRowId) ||\n    (m.buttonsResponseMessage && m.buttonsResponseMessage.selectedButtonId) ||\n    '';\n\n  return {\n    instancia: body.instance || '',\n    jid,\n    numero: jid.split('@')[0],\n    nome: data.pushName || '',\n    messageId: key.id || '',\n    texto: String(texto).trim(),\n    temMidia: !texto && Object.keys(m).some((k) => /Message$/.test(k)),\n  };\n}\n\n// Debounce: quem digita \"oi\" / \"tudo bem?\" / \"quero ver meu processo\" em três\n// mensagens seguidas tem que receber UMA resposta. Cada mensagem entra num\n// buffer; depois de alguns segundos, só a execução da última continua.\nfunction juntarBuffer(buffer, messageIdAtual) {\n  const itens = (buffer || []).map((s) => (typeof s === 'string' ? JSON.parse(s) : s));\n  if (!itens.length) return null;\n  const ultimo = itens[itens.length - 1];\n  if (ultimo.id !== messageIdAtual) return null;\n  return itens.map((i) => i.texto).filter(Boolean).join('\\n');\n}\n\nconst m = extrairMensagem($('Webhook Evolution').first().json.body || {});\nif (!m) return [];\nreturn [{ json: { ...m, chave: m.instancia + ':' + m.numero } }];"
+      },
+      "name": "Extrair mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-000000000003"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "tem-texto",
+              "leftValue": "={{ $json.texto }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Tem texto?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-000000000004"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.evolutionUrl }}/message/sendText/{{ $('Extrair mensagem').first().json.instancia }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $('Extrair mensagem').first().json.numero, text: 'Por enquanto eu consigo entender só mensagens de texto. Pode escrever sua dúvida?' }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "Avisar: só texto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        520
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Evolution API (header apikey)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "id": "00000000-0000-4000-8000-000000000005"
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "=buffer:{{ $('Extrair mensagem').first().json.chave }}",
+        "messageData": "={{ JSON.stringify({ id: $('Extrair mensagem').first().json.messageId, texto: $('Extrair mensagem').first().json.texto }) }}",
+        "tail": true
+      },
+      "name": "Guardar no buffer",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ],
+      "credentials": {
+        "redis": {
+          "id": "",
+          "name": "Redis"
+        }
+      },
+      "id": "00000000-0000-4000-8000-000000000006"
+    },
+    {
+      "parameters": {
+        "amount": "={{ $('Configuração').first().json.segundosDebounce }}",
+        "unit": "seconds"
+      },
+      "name": "Esperar mensagens",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        300
+      ],
+      "webhookId": "bot-advocacia-wait",
+      "id": "00000000-0000-4000-8000-000000000007"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "buffer",
+        "keyType": "list",
+        "key": "=buffer:{{ $('Extrair mensagem').first().json.chave }}",
+        "options": {}
+      },
+      "name": "Ler buffer",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        300
+      ],
+      "credentials": {
+        "redis": {
+          "id": "",
+          "name": "Redis"
+        }
+      },
+      "alwaysOutputData": true,
+      "id": "00000000-0000-4000-8000-000000000008"
+    },
+    {
+      "parameters": {
+        "jsCode": "function juntarBuffer(buffer, messageIdAtual) {\n  const itens = (buffer || []).map((s) => (typeof s === 'string' ? JSON.parse(s) : s));\n  if (!itens.length) return null;\n  const ultimo = itens[itens.length - 1];\n  if (ultimo.id !== messageIdAtual) return null;\n  return itens.map((i) => i.texto).filter(Boolean).join('\\n');\n}\n\nconst msg = $('Extrair mensagem').first().json;\nlet buffer = $input.first().json.buffer || [];\nif (!Array.isArray(buffer)) buffer = [buffer];\nconst texto = juntarBuffer(buffer, msg.messageId);\n// Chegou mensagem mais nova: esta execução para aqui e a da última responde.\nif (texto === null) return [];\nreturn [{ json: { ...msg, texto } }];"
+      },
+      "name": "Debounce",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-000000000009"
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "=buffer:{{ $('Debounce').first().json.chave }}"
+      },
+      "name": "Limpar buffer",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        300
+      ],
+      "credentials": {
+        "redis": {
+          "id": "",
+          "name": "Redis"
+        }
+      },
+      "id": "00000000-0000-4000-8000-000000000010"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "sessao",
+        "keyType": "string",
+        "key": "=sessao:{{ $('Debounce').first().json.chave }}",
+        "options": {}
+      },
+      "name": "Ler sessão",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        300
+      ],
+      "credentials": {
+        "redis": {
+          "id": "",
+          "name": "Redis"
+        }
+      },
+      "alwaysOutputData": true,
+      "id": "00000000-0000-4000-8000-000000000011"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Configuração').first().json.planilhaId }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "processos"
+        },
+        "options": {}
+      },
+      "name": "Ler processos",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2420,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "id": "00000000-0000-4000-8000-000000000012"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Configuração').first().json.planilhaId }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "credores"
+        },
+        "options": {}
+      },
+      "name": "Ler credores",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2640,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "id": "00000000-0000-4000-8000-000000000013"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "sem-sessao",
+              "leftValue": "={{ $('Ler sessão').first().json.sessao }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Primeira mensagem?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2860,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-000000000014"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: 'Classifique a mensagem de um cliente de escritório de advocacia. Responda só com uma palavra: andamento (quer saber como está um processo), credito (quer saber do próprio crédito, pagamento, valor a receber), contato (quer falar com uma pessoa) ou outro.\\n\\nMensagem: ' + $('Debounce').first().json.texto }] }], generationConfig: { temperature: 0, maxOutputTokens: 5 } }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "name": "IA: classificar intenção",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        120
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Gemini API (header x-goog-api-key)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "00000000-0000-4000-8000-000000000015"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validação e máscara de CPF/CNPJ.\n// Antes de consultar qualquer dado de crédito, o documento precisa ser válido:\n// isso corta digitação errada e tentativa de chute aleatório.\n\nfunction soDigitos(texto) {\n  return String(texto || '').replace(/\\D/g, '');\n}\n\nfunction cpfValido(cpf) {\n  if (cpf.length !== 11 || /^(\\d)\\1{10}$/.test(cpf)) return false;\n  for (const tamanho of [9, 10]) {\n    let soma = 0;\n    for (let i = 0; i < tamanho; i++) soma += Number(cpf[i]) * (tamanho + 1 - i);\n    const dv = (soma * 10) % 11 % 10;\n    if (dv !== Number(cpf[tamanho])) return false;\n  }\n  return true;\n}\n\nfunction cnpjValido(cnpj) {\n  if (cnpj.length !== 14 || /^(\\d)\\1{13}$/.test(cnpj)) return false;\n  const pesos = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];\n  for (const tamanho of [12, 13]) {\n    let soma = 0;\n    const p = pesos.slice(13 - tamanho);\n    for (let i = 0; i < tamanho; i++) soma += Number(cnpj[i]) * p[i];\n    const resto = soma % 11;\n    const dv = resto < 2 ? 0 : 11 - resto;\n    if (dv !== Number(cnpj[tamanho])) return false;\n  }\n  return true;\n}\n\nfunction documentoValido(texto) {\n  const d = soDigitos(texto);\n  if (d.length === 11) return cpfValido(d);\n  if (d.length === 14) return cnpjValido(d);\n  return false;\n}\n\nfunction mascararDocumento(texto) {\n  const d = soDigitos(texto);\n  if (d.length === 11) return `***.${d.slice(3, 6)}.***-**`;\n  if (d.length === 14) return `**.${d.slice(2, 5)}.***/****-**`;\n  return '***';\n}\n\n// Máquina de estados do atendimento.\n//\n// Função pura: recebe a sessão atual, o texto do usuário e os dados das\n// planilhas, e devolve a resposta e a sessão nova. Não chama API, não lê\n// banco. Por isso dá pra testar o fluxo inteiro sem n8n e sem WhatsApp.\n//\n// A IA não decide nada aqui. Ela só classifica a primeira mensagem livre\n// (\"quero saber do meu crédito\") pra pular direto pro fluxo certo. Todo o\n// resto é caminho fixo, e o bot nunca responde com dado que não veio da\n// planilha.\n\n\nconst MAX_TENTATIVAS_DOCUMENTO = 3;\nconst BLOQUEIO_MINUTOS = 30;\nconst LIMITE_OPCOES_NA_LISTA = 10;\n\nfunction normalizar(texto) {\n  return String(texto || '')\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .toLowerCase()\n    .trim();\n}\n\nfunction unicos(lista) {\n  return [...new Set(lista)].sort((a, b) => a.localeCompare(b, 'pt-BR'));\n}\n\nfunction listar(opcoes) {\n  return opcoes.map((o, i) => `${i + 1}. ${o}`).join('\\n');\n}\n\n// Aceita o número da opção ou um pedaço do nome (\"2\", \"falencia\", \"Falência\").\nfunction escolher(texto, opcoes) {\n  const t = normalizar(texto);\n  const n = Number(t);\n  if (Number.isInteger(n) && n >= 1 && n <= opcoes.length) return opcoes[n - 1];\n  const exata = opcoes.find((o) => normalizar(o) === t);\n  if (exata) return exata;\n  const parciais = opcoes.filter((o) => normalizar(o).includes(t));\n  return t.length >= 3 && parciais.length === 1 ? parciais[0] : null;\n}\n\nfunction formatarValor(valor) {\n  const n = Number(String(valor).replace(/\\./g, '').replace(',', '.'));\n  if (!Number.isFinite(n)) return String(valor);\n  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });\n}\n\nconst RODAPE = '\\n\\nDigite *0* para voltar ao menu.';\n\nfunction menu(config, nome) {\n  const ola = nome ? `Olá, ${nome.split(' ')[0]}!` : 'Olá!';\n  return (\n    `${ola} Aqui é o atendimento automático do ${config.escritorio}.\\n\\n` +\n    'Sobre o que você quer saber?\\n' +\n    '1. Andamento de um processo\\n' +\n    '2. Situação do meu crédito\\n' +\n    '3. Falar com a equipe'\n  );\n}\n\nfunction contato(config) {\n  return (\n    'Para falar com a nossa equipe:\\n' +\n    `E-mail: ${config.email}\\n` +\n    `Telefone: ${config.telefone}\\n` +\n    `Horário: ${config.horario}` +\n    RODAPE\n  );\n}\n\nfunction sessaoNova() {\n  return { estado: 'menu', fluxo: null, tipo: null, uf: null, processoId: null, tentativas: 0, bloqueadoAte: null };\n}\n\n// Processo definido: no fluxo de andamento já responde; no de crédito pede o documento.\nfunction escolherProcesso(sessao, processo) {\n  const nova = { ...sessao, processoId: processo.id };\n  if (sessao.fluxo === 'andamento') {\n    const quando = processo.atualizado_em ? `\\nÚltima atualização: ${processo.atualizado_em}` : '';\n    return {\n      sessao: { ...nova, estado: 'fim' },\n      resposta: `*${processo.empresa}* (${processo.tipo}, ${processo.uf})\\n\\n${processo.andamento}${quando}${RODAPE}`,\n    };\n  }\n  return {\n    sessao: { ...nova, estado: 'documento' },\n    resposta: `Para consultar o seu crédito no processo de *${processo.empresa}*, informe o CPF ou CNPJ do credor (só números).`,\n  };\n}\n\n// Avança pelos filtros tipo -> UF -> empresa, pulando a pergunta quando só\n// existe uma opção possível.\nfunction proximaPergunta(sessao, processos) {\n  const doTipo = processos.filter((p) => !sessao.tipo || p.tipo === sessao.tipo);\n\n  if (!sessao.tipo) {\n    const tipos = unicos(processos.map((p) => p.tipo));\n    if (tipos.length === 1) return proximaPergunta({ ...sessao, tipo: tipos[0] }, processos);\n    return { sessao: { ...sessao, estado: 'tipo' }, resposta: `Qual o tipo do processo?\\n${listar(tipos)}` };\n  }\n\n  if (!sessao.uf) {\n    const ufs = unicos(doTipo.map((p) => p.uf));\n    if (ufs.length === 1) return proximaPergunta({ ...sessao, uf: ufs[0] }, processos);\n    return { sessao: { ...sessao, estado: 'uf' }, resposta: `Em qual estado corre o processo?\\n${listar(ufs)}` };\n  }\n\n  const empresas = unicos(doTipo.filter((p) => p.uf === sessao.uf).map((p) => p.empresa));\n  if (empresas.length === 1) {\n    return escolherProcesso(sessao, doTipo.find((p) => p.uf === sessao.uf));\n  }\n  if (empresas.length > LIMITE_OPCOES_NA_LISTA) {\n    return { sessao: { ...sessao, estado: 'empresa' }, resposta: 'Digite o nome da empresa do processo.' };\n  }\n  return { sessao: { ...sessao, estado: 'empresa' }, resposta: `Qual a empresa?\\n${listar(empresas)}` };\n}\n\nfunction iniciarFluxo(fluxo, sessao, processos, config) {\n  if (fluxo === 'contato') return { sessao: { ...sessaoNova(), estado: 'fim' }, resposta: contato(config) };\n  return proximaPergunta({ ...sessaoNova(), fluxo }, processos);\n}\n\nfunction processar({ sessao, texto, nome, intencao, processos, credores, config, agora }) {\n  agora = agora || Date.now();\n  sessao = sessao ? { ...sessao } : null;\n  const t = normalizar(texto);\n\n  if (sessao && sessao.bloqueadoAte && agora < sessao.bloqueadoAte) {\n    return {\n      sessao,\n      resposta: 'Por segurança, a consulta de crédito está bloqueada por alguns minutos. ' +\n        `Se precisar, fale com a equipe: ${config.telefone}.`,\n    };\n  }\n\n  // Primeira mensagem ou pedido de voltar ao menu.\n  if (!sessao || ['0', 'menu', 'inicio', 'voltar'].includes(t)) {\n    if (sessao === null && intencao && ['andamento', 'credito', 'contato'].includes(intencao)) {\n      return iniciarFluxo(intencao, null, processos, config);\n    }\n    return { sessao: sessaoNova(), resposta: menu(config, nome) };\n  }\n\n  if (['sair', 'encerrar', 'tchau', 'obrigado', 'obrigada'].includes(t)) {\n    return { sessao: null, resposta: 'Atendimento encerrado. Se precisar, é só mandar mensagem de novo.', encerrar: true };\n  }\n\n  const doFiltro = processos.filter((p) => p.tipo === sessao.tipo && p.uf === sessao.uf);\n\n  switch (sessao.estado) {\n    case 'menu': {\n      const fluxo = { 1: 'andamento', 2: 'credito', 3: 'contato' }[t] || intencao;\n      if (!['andamento', 'credito', 'contato'].includes(fluxo)) {\n        return { sessao, resposta: 'Não entendi. Responda com o número da opção:\\n1. Andamento de um processo\\n2. Situação do meu crédito\\n3. Falar com a equipe' };\n      }\n      return iniciarFluxo(fluxo, sessao, processos, config);\n    }\n\n    case 'tipo': {\n      const opcoes = unicos(processos.map((p) => p.tipo));\n      const tipo = escolher(texto, opcoes);\n      if (!tipo) return { sessao, resposta: `Não encontrei essa opção. Escolha uma:\\n${listar(opcoes)}` };\n      return proximaPergunta({ ...sessao, tipo }, processos);\n    }\n\n    case 'uf': {\n      const opcoes = unicos(processos.filter((p) => p.tipo === sessao.tipo).map((p) => p.uf));\n      const uf = escolher(texto, opcoes);\n      if (!uf) return { sessao, resposta: `Não encontrei esse estado. Escolha um:\\n${listar(opcoes)}` };\n      return proximaPergunta({ ...sessao, uf }, processos);\n    }\n\n    case 'empresa': {\n      const opcoes = unicos(doFiltro.map((p) => p.empresa));\n      const empresa = escolher(texto, opcoes);\n      if (!empresa) {\n        const parecidas = opcoes.filter((o) => normalizar(o).includes(t)).slice(0, LIMITE_OPCOES_NA_LISTA);\n        if (parecidas.length > 1) {\n          return { sessao, resposta: `Encontrei mais de uma. Qual delas?\\n${listar(parecidas)}` };\n        }\n        return { sessao, resposta: 'Não encontrei essa empresa nesse tipo de processo e estado. Confira o nome ou digite *0* para recomeçar.' };\n      }\n      return escolherProcesso(sessao, doFiltro.find((p) => p.empresa === empresa));\n    }\n\n    case 'documento': {\n      if (!documentoValido(texto)) {\n        const tentativas = (sessao.tentativas || 0) + 1;\n        if (tentativas >= MAX_TENTATIVAS_DOCUMENTO) {\n          return {\n            sessao: { ...sessao, tentativas: 0, bloqueadoAte: agora + BLOQUEIO_MINUTOS * 60000 },\n            resposta: `Documento inválido ${MAX_TENTATIVAS_DOCUMENTO} vezes. Por segurança, a consulta foi bloqueada por ${BLOQUEIO_MINUTOS} minutos.`,\n          };\n        }\n        return { sessao: { ...sessao, tentativas }, resposta: 'Esse CPF/CNPJ não é válido. Confira os números e envie de novo.' };\n      }\n\n      const doc = soDigitos(texto);\n      const credor = credores.find((c) => String(c.processo_id) === String(sessao.processoId) && soDigitos(c.documento) === doc);\n      const mascara = mascararDocumento(doc);\n      const fim = { ...sessao, estado: 'fim', tentativas: 0 };\n\n      // Resposta igual pra \"documento não existe\" e \"documento existe em outro\n      // processo\": o bot não confirma pra ninguém em quais processos um CPF aparece.\n      if (!credor) {\n        return {\n          sessao: fim,\n          resposta: `Não encontramos crédito para o documento ${mascara} nesse processo.\\n` +\n            `Se você acha que é um erro, fale com a equipe: ${config.email}${RODAPE}`,\n        };\n      }\n      return {\n        sessao: fim,\n        resposta:\n          `Crédito encontrado para ${mascara}:\\n\\n` +\n          `Classe: ${credor.classe}\\n` +\n          `Valor: ${formatarValor(credor.valor)}\\n` +\n          `Situação: ${credor.situacao}${RODAPE}`,\n      };\n    }\n\n    case 'fim':\n    default: {\n      // Depois de uma resposta, \"2\" já começa outra consulta sem passar pelo menu.\n      const fluxo = { 1: 'andamento', 2: 'credito', 3: 'contato' }[t];\n      if (fluxo) return iniciarFluxo(fluxo, sessao, processos, config);\n      return { sessao: sessaoNova(), resposta: menu(config, nome) };\n    }\n  }\n}\n\nconst cfg = $('Configuração').first().json;\nconst msg = $('Debounce').first().json;\n\nlet sessao = null;\ntry { sessao = JSON.parse($('Ler sessão').first().json.sessao || 'null'); } catch (e) { sessao = null; }\n\n// Se a IA respondeu, pega a palavra. Se falhou ou não rodou, segue sem intenção.\nlet intencao = null;\nconst ia = $input.first().json || {};\nif (ia.candidates) {\n  const t = (((ia.candidates[0] || {}).content || {}).parts || [{}])[0].text || '';\n  intencao = t.toLowerCase().normalize('NFD').replace(/[^a-z]/g, '');\n}\n\nconst processos = $('Ler processos').all().map((i) => i.json).filter((p) => p.id);\nconst credores = $('Ler credores').all().map((i) => i.json).filter((c) => c.processo_id);\n\nconst r = processar({ sessao, texto: msg.texto, nome: msg.nome, intencao, processos, credores, config: cfg });\nreturn [{ json: { ...msg, resposta: r.resposta, sessaoNova: JSON.stringify(r.sessao || null) } }];"
+      },
+      "name": "Máquina de estados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-000000000016"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "keyType": "string",
+        "expire": true,
+        "ttl": 1800,
+        "key": "=sessao:{{ $('Máquina de estados').first().json.chave }}",
+        "value": "={{ $('Máquina de estados').first().json.sessaoNova }}"
+      },
+      "name": "Salvar sessão",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        3520,
+        300
+      ],
+      "credentials": {
+        "redis": {
+          "id": "",
+          "name": "Redis"
+        }
+      },
+      "id": "00000000-0000-4000-8000-000000000017"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.evolutionUrl }}/message/sendText/{{ $('Extrair mensagem').first().json.instancia }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $('Extrair mensagem').first().json.numero, text: $('Máquina de estados').first().json.resposta }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "Enviar resposta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3740,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Evolution API (header apikey)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "id": "00000000-0000-4000-8000-000000000018"
+    }
+  ],
+  "connections": {
+    "Webhook Evolution": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Extrair mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair mensagem": {
+      "main": [
+        [
+          {
+            "node": "Tem texto?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem texto?": {
+      "main": [
+        [
+          {
+            "node": "Guardar no buffer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avisar: só texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar no buffer": {
+      "main": [
+        [
+          {
+            "node": "Esperar mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar mensagens": {
+      "main": [
+        [
+          {
+            "node": "Ler buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler buffer": {
+      "main": [
+        [
+          {
+            "node": "Debounce",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Debounce": {
+      "main": [
+        [
+          {
+            "node": "Limpar buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpar buffer": {
+      "main": [
+        [
+          {
+            "node": "Ler sessão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler sessão": {
+      "main": [
+        [
+          {
+            "node": "Ler processos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler processos": {
+      "main": [
+        [
+          {
+            "node": "Ler credores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler credores": {
+      "main": [
+        [
+          {
+            "node": "Primeira mensagem?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Primeira mensagem?": {
+      "main": [
+        [
+          {
+            "node": "IA: classificar intenção",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Máquina de estados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA: classificar intenção": {
+      "main": [
+        [
+          {
+            "node": "Máquina de estados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Máquina de estados": {
+      "main": [
+        [
+          {
+            "node": "Salvar sessão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar sessão": {
+      "main": [
+        [
+          {
+            "node": "Enviar resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
